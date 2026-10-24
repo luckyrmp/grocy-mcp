@@ -111,9 +111,32 @@ def list_stock() -> list[dict[str, Any]]:
     return data if isinstance(data, list) else []
 
 
-def volatile_stock() -> list[dict[str, Any]]:
-    data = _request("GET", "/stock/volatile")
-    return data if isinstance(data, list) else []
+_VOLATILE_GROUPS = (
+    ("expired", "expired_products"),
+    ("overdue", "overdue_products"),
+    ("due", "due_products"),
+    ("missing", "missing_products"),
+)
+
+
+def volatile_stock(due_soon_days: int | None = None) -> list[dict[str, Any]]:
+    """Flatten Grocy's grouped /stock/volatile response into rows tagged with a `status`, most urgent first."""
+    params = {"due_soon_days": due_soon_days} if due_soon_days is not None else None
+    data = _request("GET", "/stock/volatile", params=params)
+    if isinstance(data, list):
+        return data
+    if not isinstance(data, dict):
+        return []
+    rows: list[dict[str, Any]] = []
+    for status, key in _VOLATILE_GROUPS:
+        group = sorted(data.get(key) or [], key=lambda r: str(r.get("best_before_date") or "9999"))
+        for row in group:
+            row = {"status": status, **row}
+            if status == "missing":  # missing rows are product objects, not stock rows
+                row.setdefault("product_id", row.get("id"))
+                row.setdefault("product_name", row.get("name"))
+            rows.append(row)
+    return rows
 
 
 def product_stock_details(product_id: int) -> dict[str, Any]:

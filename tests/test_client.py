@@ -132,3 +132,33 @@ def test_list_tasks_returns_list() -> None:
     respx.get("https://grocy.example/api/tasks").mock(return_value=httpx.Response(200, json=[{"id": 1, "name": "Fix fence"}]))
 
     assert client.list_tasks() == [{"id": 1, "name": "Fix fence"}]
+
+
+@respx.mock
+def test_volatile_stock_flattens_grouped_response_with_status() -> None:
+    route = respx.get("https://grocy.example/api/stock/volatile").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "due_products": [
+                    {"product_id": 5, "best_before_date": "2026-10-29", "product": {"name": "Arugula"}},
+                    {"product_id": 1, "best_before_date": "2026-10-25", "product": {"name": "Burrito mix"}},
+                ],
+                "overdue_products": [{"product_id": 2, "best_before_date": "2026-10-20", "product": {"name": "Milk"}}],
+                "expired_products": [{"product_id": 3, "best_before_date": "2026-10-19", "product": {"name": "Spinach"}}],
+                "missing_products": [{"id": 4, "name": "Eggs", "amount_missing": 6}],
+            },
+        )
+    )
+
+    rows = client.volatile_stock(due_soon_days=3)
+
+    assert route.calls[0].request.url.params["due_soon_days"] == "3"
+    assert [(r["status"], r["product_id"]) for r in rows] == [
+        ("expired", 3),
+        ("overdue", 2),
+        ("due", 1),
+        ("due", 5),
+        ("missing", 4),
+    ]
+    assert rows[4]["product_name"] == "Eggs"

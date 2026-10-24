@@ -105,10 +105,13 @@ def register_tools(mcp: FastMCP) -> None:
     async def grocy_volatile_stock(
         limit: Annotated[int, Field(description="Maximum number of due/overdue/missing rows to return, 1-500")] = 100,
         offset: Annotated[int, Field(description="Number of volatile stock rows to skip before returning results")] = 0,
+        due_soon_days: Annotated[
+            int | None, Field(description="Days ahead that count as due soon; defaults to Grocy's own setting (5)")
+        ] = None,
     ) -> str:
-        """Return products due soon, overdue, expired, or missing according to Grocy."""
+        """Return products expired, overdue, due soon, or missing (below min stock), most urgent first."""
         try:
-            return _format_stock(_page(api.volatile_stock(), limit, offset))
+            return _format_stock(_page(api.volatile_stock(due_soon_days), limit, offset))
         except Exception as exc:
             return f"Error getting Grocy volatile stock: {exc}"
 
@@ -401,8 +404,12 @@ def _format_stock(rows: list[dict[str, Any]]) -> str:
     for r in rows:
         product = r.get("product") or {}
         product_name = product.get("name") or r.get("product_name") or f"product #{r.get('product_id')}"
+        status = f"[{r['status']}] " if r.get("status") else ""
+        if r.get("status") == "missing":
+            lines.append(f"- {status}#{r.get('product_id')} {product_name}: missing={r.get('amount_missing')}")
+            continue
         lines.append(
-            f"- #{r.get('product_id')} {product_name}: amount={r.get('amount')}"
+            f"- {status}#{r.get('product_id')} {product_name}: amount={r.get('amount')}"
             f" opened={r.get('amount_opened')} due={r.get('best_before_date')} value={r.get('value')}"
         )
     return "\n".join(lines)
